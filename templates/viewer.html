@@ -1,0 +1,541 @@
+<!doctype html>
+<!--
+  GENERATIVE ART VIEWER TEMPLATE  (p5.js, single self-contained file)
+
+  KEEP:    the layout, the seed controls, the settings box, pause/save, keyboard shortcuts,
+           and the section order inside <script> (CONFIG, PARAMS, PALETTES, sketch, engine).
+  CHANGE:  section 1 (CONFIG), 2 (PARAMS), 3 (PALETTES) and 4 (the sketch itself).
+  NEVER TOUCH: section 5 (engine) unless you know why. It owns seeding, UI, reset, and export.
+
+  Determinism contract for the sketch (section 4):
+    - Use ONLY random(), randomGaussian() and noise(). Never Math.random(), Date, or millis().
+    - Use state.t (a frame counter that resets with every seed) instead of frameCount or time.
+    - Build everything inside buildSystem(); never at load time.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Generative Art</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+<style>
+:root {
+  color-scheme: light dark;
+  --paper: #f6f4ee;
+  --panel: #fbfaf6;
+  --ink: #1d1c1a;
+  --muted: #6b6860;
+  --line: #dedbd0;
+  --accent: #c8553a;
+  --on-accent: #fbfaf6;
+  --stage: #ebe8dd;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-title: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #17171a; --panel: #1d1d21; --ink: #ecebe6; --muted: #9a9890;
+    --line: #34343a; --accent: #e77a5c; --on-accent: #17171a; --stage: #101013;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 14px/1.5 var(--font-ui);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.app { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 100%; }
+.panel {
+  background: var(--panel); border-right: 1px solid var(--line);
+  padding: 24px 20px 32px; overflow-y: auto;
+  position: sticky; top: 0; align-self: start; height: 100vh;
+}
+.stage { background: var(--stage); display: grid; place-items: center; padding: 24px; min-width: 0; }
+#canvas-holder {
+  width: min(100%, 920px, calc(100vh - 48px)); border-radius: 10px; overflow: hidden;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18); line-height: 0;
+}
+#canvas-holder canvas { display: block; width: 100% !important; height: auto !important; }
+.notice { padding: 28px; line-height: 1.5; color: var(--muted); background: var(--panel); }
+
+h1 { font: 600 24px/1.15 var(--font-title); margin: 0 0 4px; }
+.subtitle { color: var(--muted); margin: 0 0 20px; }
+section { border-top: 1px solid var(--line); padding: 16px 0 4px; margin-top: 4px; }
+h2 { font: 600 11px/1 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+
+.row { display: flex; gap: 8px; margin-bottom: 8px; }
+.row > * { flex: 1; }
+button, select, input[type="number"], textarea {
+  font: inherit; color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--radius); min-height: 44px; padding: 0 12px;
+}
+button { cursor: pointer; font-weight: 600; transition: transform 0.15s ease-out, background-color 0.15s ease-out; }
+button:hover { transform: translateY(-1px); }
+button:active { transform: translateY(0); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+textarea { width: 100%; min-height: 120px; padding: 10px 12px; font: 12px/1.45 var(--font-mono); resize: vertical; }
+input[type="number"] { width: 100%; font-family: var(--font-mono); }
+select { width: 100%; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.control { margin-bottom: 14px; }
+.control label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.control output { font-family: var(--font-mono); color: var(--muted); }
+input[type="range"] { width: 100%; min-height: 28px; accent-color: var(--accent); }
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; margin-top: 8px; }
+.swatches label { display: grid; gap: 4px; font-size: 11px; color: var(--muted); text-align: center; }
+.swatches input[type="color"] { width: 100%; height: 40px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); }
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+#status { min-height: 20px; color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  .stage { order: -1; padding: 12px; }
+  #canvas-holder { width: 100%; }
+  .panel { position: static; height: auto; border-right: 0; border-top: 1px solid var(--line); }
+}
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  button:hover { transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel" aria-label="Controls">
+    <h1 id="title">Title</h1>
+    <p class="subtitle" id="subtitle">Subtitle</p>
+
+    <section aria-labelledby="h-seed">
+      <h2 id="h-seed">Seed</h2>
+      <label for="seed-input" class="hint" style="margin:0 0 6px;display:block">Same seed and settings always draw the same piece.</label>
+      <input type="number" id="seed-input" min="1" max="999999" step="1" inputmode="numeric">
+      <div class="row" style="margin-top:8px">
+        <button type="button" id="btn-prev">← Prev</button>
+        <button type="button" id="btn-next">Next →</button>
+      </div>
+      <button type="button" id="btn-random" class="primary" style="width:100%">↻ Random seed</button>
+    </section>
+
+    <section aria-labelledby="h-params">
+      <h2 id="h-params">Parameters</h2>
+      <div id="params"></div>
+    </section>
+
+    <section aria-labelledby="h-colors">
+      <h2 id="h-colors">Colors</h2>
+      <label for="palette-select" class="hint" style="margin:0 0 6px;display:block">Palette preset</label>
+      <select id="palette-select"></select>
+      <div class="swatches" id="swatches"></div>
+    </section>
+
+    <section aria-labelledby="h-actions">
+      <h2 id="h-actions">Actions</h2>
+      <div class="row">
+        <button type="button" id="btn-pause">Pause</button>
+        <button type="button" id="btn-save">Save PNG</button>
+      </div>
+      <button type="button" id="btn-reset" style="width:100%">Reset to defaults</button>
+      <p id="status" role="status" aria-live="polite"></p>
+      <p class="hint">Shortcuts: ← → seed, R random, Space pause, S save.</p>
+    </section>
+
+    <section aria-labelledby="h-settings">
+      <h2 id="h-settings">Settings (copy to reproduce)</h2>
+      <textarea id="settings-box" spellcheck="false" aria-label="Settings as JSON"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button type="button" id="btn-copy">Copy</button>
+        <button type="button" id="btn-apply">Apply</button>
+      </div>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div id="canvas-holder"><div class="notice">Loading…</div></div>
+  </main>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// 1. CONFIG: edit this per piece
+// ═══════════════════════════════════════════════════════════════════════════
+const CONFIG = {
+  title: 'Drift',
+  subtitle: 'A flow field of seeded particles',
+  size: 1000,            // logical canvas size in px (square). CSS scales it to fit.
+  animated: true,        // false = draw once per seed with drawStatic(), then stop
+  defaultSeed: 12345,
+  settleFrames: 240,     // frames pre-drawn when paused (and for reduced-motion users)
+  slug: 'drift'          // used in the PNG file name
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. PARAMS: every tunable value. The UI, defaults, reset and settings JSON
+//    are all generated from this list.  regen:true = rebuild the system on change.
+// ═══════════════════════════════════════════════════════════════════════════
+const PARAMS = [
+  { key: 'particleCount', label: 'Particle count', min: 500,   max: 8000, step: 500,   value: 3000, regen: true  },
+  { key: 'noiseScale',    label: 'Noise scale',    min: 0.001, max: 0.01, step: 0.001, value: 0.003, regen: true },
+  { key: 'swirl',         label: 'Swirl',          min: 0.5,   max: 4,    step: 0.5,   value: 2,    regen: true  },
+  { key: 'flowSpeed',     label: 'Flow speed',     min: 0.2,   max: 2,    step: 0.1,   value: 0.8,  regen: false },
+  { key: 'lineAlpha',     label: 'Line opacity',   min: 10,    max: 200,  step: 5,     value: 85,   regen: false },
+  { key: 'lineWeight',    label: 'Line weight',    min: 0.5,   max: 3,    step: 0.5,   value: 1,    regen: false }
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. PALETTES: bg + 3 to 5 colors. Avoid pure black and white.
+// ═══════════════════════════════════════════════════════════════════════════
+const PALETTES = {
+  'Warm paper': { bg: '#faf9f5', colors: ['#d97757', '#6a9bcc', '#788c5d', '#b0aea5'] },
+  'Midnight':   { bg: '#11131a', colors: ['#7aa2f7', '#bb9af7', '#7dcfff', '#e0af68'] },
+  'Moss & bone':{ bg: '#efe9dc', colors: ['#3d5a40', '#8a9a5b', '#c9b27c', '#5b4636'] },
+  'Signal':     { bg: '#141414', colors: ['#ff5a36', '#ffd23f', '#3bceac', '#f4f1de'] },
+  'Tide':       { bg: '#f3f7f6', colors: ['#0b3c5d', '#328cc1', '#d9b310', '#7fb7a8'] }
+};
+const DEFAULT_PALETTE = 'Warm paper';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. THE SKETCH: replace with your algorithm.
+//    Read values from P (e.g. P.flowSpeed) and colors from state.colors / state.bg.
+//    Seeded randomness only: random(), randomGaussian(), noise(). Use state.t for time.
+// ═══════════════════════════════════════════════════════════════════════════
+const CELL = 10;
+let particles = [], field = [], cols = 0, rows = 0;
+
+function buildSystem() {
+  cols = ceil(width / CELL);
+  rows = ceil(height / CELL);
+  field = new Array(cols * rows);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      field[x + y * cols] = noise(x * CELL * P.noiseScale, y * CELL * P.noiseScale) * TWO_PI * P.swirl;
+    }
+  }
+  particles = Array.from({ length: P.particleCount }, (_, i) => new Particle(i));
+}
+
+function drawFrame() {            // called once per frame while animated and not paused
+  strokeWeight(P.lineWeight);
+  for (const p of particles) { p.step(); p.show(); }
+}
+
+function drawStatic() {           // used when CONFIG.animated is false
+  for (let i = 0; i < 400; i++) drawFrame();
+}
+
+class Particle {
+  constructor(i) {
+    this.rgb = colorToRgb(state.colors[i % state.colors.length]);
+    this.spawn();
+  }
+  spawn() {
+    this.x = random(width);
+    this.y = random(height);
+    this.px = this.x;
+    this.py = this.y;
+  }
+  step() {
+    this.px = this.x;
+    this.py = this.y;
+    const cx = constrain(floor(this.x / CELL), 0, cols - 1);
+    const cy = constrain(floor(this.y / CELL), 0, rows - 1);
+    const angle = field[cx + cy * cols];
+    this.x += cos(angle) * P.flowSpeed * 2;
+    this.y += sin(angle) * P.flowSpeed * 2;
+    if (this.x < 0 || this.x > width || this.y < 0 || this.y > height) this.spawn();
+  }
+  show() {
+    stroke(this.rgb[0], this.rgb[1], this.rgb[2], P.lineAlpha);
+    line(this.px, this.py, this.x, this.y);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. ENGINE: seeding, UI, reset, settings, export. Usually leave as is.
+// ═══════════════════════════════════════════════════════════════════════════
+const P = {};                                    // live parameter values
+const state = { seed: CONFIG.defaultSeed, paletteName: DEFAULT_PALETTE, bg: '', colors: [], paused: false, t: 0 };
+let ready = false, regenTimer = null;
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const decimals = (step) => (String(step).split('.')[1] || '').length;
+
+function colorToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [128, 128, 128];
+}
+
+// ---- p5 lifecycle ----------------------------------------------------------
+function setup() {
+  pixelDensity(1);
+  const c = createCanvas(CONFIG.size, CONFIG.size);
+  c.parent('canvas-holder');
+  c.elt.setAttribute('role', 'img');
+  c.elt.setAttribute('aria-label', CONFIG.title + ': ' + CONFIG.subtitle + ' (seed ' + state.seed + ')');
+  const holder = $('canvas-holder');
+  const notice = holder.querySelector('.notice');
+  if (notice) notice.remove();
+  ready = true;
+  initializeSystem();
+}
+
+function draw() {
+  if (!CONFIG.animated || state.paused) return;
+  drawFrame();
+  state.t++;
+}
+
+function initializeSystem() {
+  if (!ready) return;
+  randomSeed(state.seed);
+  noiseSeed(state.seed);
+  state.t = 0;
+  background(state.bg);
+  buildSystem();
+  if (!CONFIG.animated) {
+    drawStatic();
+    noLoop();
+  } else if (state.paused) {
+    for (let i = 0; i < CONFIG.settleFrames; i++) { drawFrame(); state.t++; }
+    noLoop();
+  } else {
+    loop();
+  }
+  const el = document.querySelector('#canvas-holder canvas');
+  if (el) el.setAttribute('aria-label', CONFIG.title + ': ' + CONFIG.subtitle + ' (seed ' + state.seed + ')');
+  refreshSettingsBox();
+}
+
+function scheduleRegen() {
+  clearTimeout(regenTimer);
+  regenTimer = setTimeout(initializeSystem, 60);
+}
+
+// ---- seed controls ---------------------------------------------------------
+function setSeed(n) {
+  const v = Math.floor(Number(n));
+  state.seed = Number.isFinite(v) ? clamp(v, 1, 999999) : state.seed;
+  $('seed-input').value = state.seed;
+  initializeSystem();
+}
+function updateSeed()        { setSeed($('seed-input').value); }
+function previousSeed()      { setSeed(state.seed - 1); }
+function nextSeed()          { setSeed(state.seed + 1); }
+function randomSeedAndUpdate() { setSeed(Math.floor(Math.random() * 999999) + 1); }   // picks a seed, not art randomness
+
+// ---- parameters ------------------------------------------------------------
+function updateParam(key, raw) {
+  const def = PARAMS.find((p) => p.key === key);
+  if (!def) return;
+  const v = clamp(Number(raw), def.min, def.max);
+  if (!Number.isFinite(v)) return;
+  P[key] = v;
+  $('in-' + key).value = v;
+  $('out-' + key).textContent = v.toFixed(decimals(def.step));
+  if (def.regen) scheduleRegen(); else refreshSettingsBox();
+}
+
+function buildParamControls() {
+  const host = $('params');
+  PARAMS.forEach((def) => {
+    P[def.key] = def.value;
+    const wrap = document.createElement('div');
+    wrap.className = 'control';
+    const label = document.createElement('label');
+    label.htmlFor = 'in-' + def.key;
+    const name = document.createElement('span');
+    name.textContent = def.label;
+    const out = document.createElement('output');
+    out.id = 'out-' + def.key;
+    out.setAttribute('for', 'in-' + def.key);
+    out.textContent = def.value.toFixed(decimals(def.step));
+    label.append(name, out);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.id = 'in-' + def.key;
+    input.min = def.min; input.max = def.max; input.step = def.step; input.value = def.value;
+    input.addEventListener('input', () => updateParam(def.key, input.value));
+    wrap.append(label, input);
+    host.appendChild(wrap);
+  });
+}
+
+// ---- colors ----------------------------------------------------------------
+function updateColor(index, value) {            // index -1 = background
+  if (index < 0) state.bg = value; else state.colors[index] = value;
+  scheduleRegen();
+}
+
+function renderSwatches() {
+  const host = $('swatches');
+  host.replaceChildren();
+  const make = (labelText, id, value, index) => {
+    const label = document.createElement('label');
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'color'; input.id = id; input.value = value;
+    input.addEventListener('input', () => updateColor(index, input.value));
+    label.append(input, span);
+    host.appendChild(label);
+  };
+  make('Background', 'color-bg', state.bg, -1);
+  state.colors.forEach((c, i) => make('Color ' + (i + 1), 'color-' + i, c, i));
+}
+
+function setPalette(name) {
+  const pal = PALETTES[name] || PALETTES[DEFAULT_PALETTE];
+  state.paletteName = PALETTES[name] ? name : DEFAULT_PALETTE;
+  state.bg = pal.bg;
+  state.colors = pal.colors.slice();
+  $('palette-select').value = state.paletteName;
+  renderSwatches();
+  initializeSystem();
+}
+
+// ---- reset, pause, save ----------------------------------------------------
+function resetParameters() {
+  PARAMS.forEach((def) => {
+    P[def.key] = def.value;
+    $('in-' + def.key).value = def.value;
+    $('out-' + def.key).textContent = def.value.toFixed(decimals(def.step));
+  });
+  state.seed = CONFIG.defaultSeed;
+  $('seed-input').value = state.seed;
+  setPalette(DEFAULT_PALETTE);
+  say('Reset to defaults.');
+}
+
+function togglePause() {
+  if (!CONFIG.animated) return;
+  state.paused = !state.paused;
+  $('btn-pause').textContent = state.paused ? 'Play' : 'Pause';
+  if (state.paused) noLoop(); else loop();
+}
+
+function say(msg) { $('status').textContent = msg; }
+
+function exportImage() {
+  try {
+    saveCanvas(CONFIG.slug + '-' + state.seed, 'png');
+    say('Saved ' + CONFIG.slug + '-' + state.seed + '.png');
+  } catch (e) {
+    say('Saving is blocked here. Right-click the canvas and choose Save image.');
+  }
+}
+
+// ---- settings JSON (seed + params + colors = the whole piece) --------------
+function getSettings() {
+  const params = {};
+  PARAMS.forEach((def) => { params[def.key] = P[def.key]; });
+  return { piece: CONFIG.slug, seed: state.seed, params, palette: { name: state.paletteName, bg: state.bg, colors: state.colors } };
+}
+
+function refreshSettingsBox() {
+  const box = $('settings-box');
+  if (box && document.activeElement !== box) box.value = JSON.stringify(getSettings(), null, 2);
+}
+
+function applySettings(obj) {
+  if (!obj || typeof obj !== 'object') throw new Error('Not a settings object');
+  const hex = /^#[0-9a-f]{6}$/i;
+  if (obj.params && typeof obj.params === 'object') {
+    PARAMS.forEach((def) => {
+      const v = Number(obj.params[def.key]);
+      if (obj.params[def.key] !== undefined && Number.isFinite(v)) {
+        P[def.key] = clamp(v, def.min, def.max);
+        $('in-' + def.key).value = P[def.key];
+        $('out-' + def.key).textContent = P[def.key].toFixed(decimals(def.step));
+      }
+    });
+  }
+  const pal = obj.palette;
+  if (pal && typeof pal === 'object') {
+    if (hex.test(pal.bg)) state.bg = pal.bg;
+    if (Array.isArray(pal.colors) && pal.colors.length >= 1 && pal.colors.length <= 8 && pal.colors.every((c) => hex.test(c))) {
+      state.colors = pal.colors.slice();
+    }
+    state.paletteName = PALETTES[pal.name] ? pal.name : state.paletteName;
+    $('palette-select').value = state.paletteName;
+    renderSwatches();
+  }
+  if (obj.seed !== undefined) { setSeed(obj.seed); } else { initializeSystem(); }
+}
+
+async function copySettings() {
+  const text = JSON.stringify(getSettings(), null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    say('Settings copied.');
+  } catch (e) {
+    const box = $('settings-box');
+    box.value = text; box.focus(); box.select();
+    say('Select the text and copy it (Ctrl or Cmd + C).');
+  }
+}
+
+// ---- wire up the page ------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  document.title = CONFIG.title;
+  $('title').textContent = CONFIG.title;
+  $('subtitle').textContent = CONFIG.subtitle;
+
+  buildParamControls();
+
+  const select = $('palette-select');
+  Object.keys(PALETTES).forEach((name) => {
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    select.appendChild(o);
+  });
+  select.addEventListener('change', () => setPalette(select.value));
+  const pal = PALETTES[DEFAULT_PALETTE];
+  state.bg = pal.bg; state.colors = pal.colors.slice();
+  select.value = DEFAULT_PALETTE;
+  renderSwatches();
+
+  $('seed-input').value = state.seed;
+  $('seed-input').addEventListener('change', updateSeed);
+  $('btn-prev').addEventListener('click', previousSeed);
+  $('btn-next').addEventListener('click', nextSeed);
+  $('btn-random').addEventListener('click', randomSeedAndUpdate);
+  $('btn-reset').addEventListener('click', resetParameters);
+  $('btn-pause').addEventListener('click', togglePause);
+  $('btn-save').addEventListener('click', exportImage);
+  $('btn-copy').addEventListener('click', copySettings);
+  $('btn-apply').addEventListener('click', () => {
+    try { applySettings(JSON.parse($('settings-box').value)); say('Settings applied.'); }
+    catch (e) { say('Could not read those settings: ' + e.message); }
+  });
+  if (!CONFIG.animated) $('btn-pause').disabled = true;
+
+  // Reduced-motion users start paused on a settled image instead of a moving one.
+  if (CONFIG.animated && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    state.paused = true;
+    $('btn-pause').textContent = 'Play';
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowLeft')       { e.preventDefault(); previousSeed(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); nextSeed(); }
+    else if (e.key === 'r' || e.key === 'R') { randomSeedAndUpdate(); }
+    else if (e.key === 's' || e.key === 'S') { exportImage(); }
+    else if (e.key === ' ' && t !== 'BUTTON') { e.preventDefault(); togglePause(); }
+  });
+});
+
+window.addEventListener('load', () => {
+  if (typeof p5 === 'undefined') {
+    const n = document.querySelector('#canvas-holder .notice');
+    if (n) n.textContent = 'p5.js could not be loaded, so the art cannot draw. Check your connection and reload.';
+  }
+});
+</script>
+</body>
+</html>
