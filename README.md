@@ -80,11 +80,9 @@ It flags unseeded randomness, wall-clock use, `frameCount`, missing seed control
 ### Claude Code
 
 ```bash
-git clone https://github.com/zakiuhh/generative-art-p5js.git
+git clone https://github.com/zakiuhh/gen-art-p5js.git
 cp -r generative-art-p5js ~/.claude/skills/
 ```
-
-(Change the clone URL if your repo lives somewhere else.)
 
 ## Repo structure
 
